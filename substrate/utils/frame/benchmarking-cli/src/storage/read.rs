@@ -40,48 +40,67 @@ impl StorageCmd {
 		let best_hash = client.usage_info().chain.best_hash;
 
 		info!("Preparing keys from block {}", best_hash);
-		// Load all keys and randomly shuffle them.
-		let mut keys: Vec<_> = client.storage_keys(best_hash, None, None)?.collect();
-		let (mut rng, _) = new_rng(None);
-		keys.shuffle(&mut rng);
+		use sp_storage::StorageKey;
+		let pallets = vec![
+			(StorageKey(vec![159u8, 118, 113, 106, 104, 165, 130, 199, 3, 221, 158, 68, 112, 4, 41, 185]), "msa"),
+			(StorageKey(vec![238u8, 198, 243, 193, 61, 38, 174, 37, 7, 201, 155, 103, 81, 225, 158, 118]), "schemas"),
+			(StorageKey(vec![158u8, 163, 226, 209, 15, 219, 154, 7, 31, 47, 83, 77, 81, 176, 150, 31]), "messages"),
+			(StorageKey(vec![162u8, 236, 217, 59, 29, 72, 255, 160, 252, 101, 49, 55, 9, 127, 240, 68]), "handles"),
+			(StorageKey(vec![66u8, 157, 39, 255, 106, 81, 167, 142, 230, 183, 209, 118, 240, 33, 21, 199]), "capacity"),
+		];
+		for (prefix, pallet_name) in pallets {
+		    let mut pallet_record = BenchRecord::default();
+		    info!("starting metrics for {}", &pallet_name);
 
-		let mut child_nodes = Vec::new();
-		// Interesting part here:
-		// Read all the keys in the database and measure the time it takes to access each.
-		info!("Reading {} keys", keys.len());
-		for key in keys.as_slice() {
-			match (self.params.include_child_trees, self.is_child_key(key.clone().0)) {
-				(true, Some(info)) => {
-					// child tree key
-					for ck in client.child_storage_keys(best_hash, info.clone(), None, None)? {
-						child_nodes.push((ck.clone(), info.clone()));
-					}
-				},
-				_ => {
-					// regular key
-					let start = Instant::now();
-					let v = client
-						.storage(best_hash, &key)
-						.expect("Checked above to exist")
-						.ok_or("Value unexpectedly empty")?;
-					record.append(v.0.len(), start.elapsed())?;
-				},
-			}
+			// Load all keys and randomly shuffle them.
+    		let mut keys: Vec<_> = client.storage_keys(best_hash, Some(&prefix), None)?.collect();
+    		let (mut rng, _) = new_rng(None);
+    		keys.shuffle(&mut rng);
+
+    		let mut child_nodes = Vec::new();
+    		// Interesting part here:
+    		// Read all the keys in the database and measure the time it takes to access each.
+    		info!("Reading {} keys", keys.len());
+    		for key in keys.as_slice() {
+    			match (self.params.include_child_trees, self.is_child_key(key.clone().0)) {
+    				(true, Some(info)) => {
+    					// child tree key
+    					for ck in client.child_storage_keys(best_hash, info.clone(), None, None)? {
+    						child_nodes.push((ck.clone(), info.clone()));
+    					}
+    				},
+    				_ => {
+    					// regular key
+    					let start = Instant::now();
+    					let v = client
+    						.storage(best_hash, &key)
+    						.expect("Checked above to exist")
+    						.ok_or("Value unexpectedly empty")?;
+                        let end = start.elapsed();
+       					pallet_record.append(v.0.len(), end)?;
+    					record.append(v.0.len(), end)?;
+    				},
+    			}
+    		}
+
+    		if self.params.include_child_trees {
+    			child_nodes.shuffle(&mut rng);
+
+    			info!("Reading {} child keys", child_nodes.len());
+    			for (key, info) in child_nodes.as_slice() {
+    				let start = Instant::now();
+    				let v = client
+    					.child_storage(best_hash, info, key)
+    					.expect("Checked above to exist")
+    					.ok_or("Value unexpectedly empty")?;
+    				record.append(v.0.len(), start.elapsed())?;
+    			}
+    		}
+
+            let stats = pallet_record.calculate_stats()?;
+			info!("Pallet Time summary [ns]:\n{:?}\nValue size summary:\n{:?}", stats.0, stats.1);
 		}
 
-		if self.params.include_child_trees {
-			child_nodes.shuffle(&mut rng);
-
-			info!("Reading {} child keys", child_nodes.len());
-			for (key, info) in child_nodes.as_slice() {
-				let start = Instant::now();
-				let v = client
-					.child_storage(best_hash, info, key)
-					.expect("Checked above to exist")
-					.ok_or("Value unexpectedly empty")?;
-				record.append(v.0.len(), start.elapsed())?;
-			}
-		}
 		Ok(record)
 	}
 }
