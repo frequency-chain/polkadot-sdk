@@ -71,9 +71,9 @@ impl StorageCmd {
 		// Generate all random values first; Make sure there are no collisions with existing
 		// db entries, so we can rollback all additions without corrupting existing entries.
 		for key_value in kvs {
-			let (k, original_v) = key_value?;
-			match (self.params.include_child_trees, self.is_child_key(k.to_vec())) {
-				(true, Some(info)) => {
+			let (k, _original_v) = key_value?;
+			match self.is_child_key(k.to_vec()) {
+				Some(info) => {
 					let child_keys =
 						client.child_storage_keys(best_hash, info.clone(), None, None)?;
 					for ck in child_keys {
@@ -82,78 +82,47 @@ impl StorageCmd {
 				},
 				_ => {
 					// regular key
-					let mut new_v = vec![0; original_v.len()];
-					loop {
-						// Create a random value to overwrite with.
-						// NOTE: We use a possibly higher entropy than the original value,
-						// could be improved but acts as an over-estimation which is fine for now.
-						rng.fill_bytes(&mut new_v[..]);
-						if check_new_value::<Block>(
-							db.clone(),
-							&trie,
-							&k.to_vec(),
-							&new_v,
-							self.state_version(),
-							state_col,
-							None,
-						) {
-							break
-						}
-					}
-
-					// Write each value in one commit.
-					let (size, duration) = measure_write::<Block>(
-						db.clone(),
-						&trie,
-						k.to_vec(),
-						new_v.to_vec(),
-						self.state_version(),
-						state_col,
-						None,
-					)?;
-					record.append(size, duration)?;
 				},
 			}
 		}
 
-		if self.params.include_child_trees {
-			child_nodes.shuffle(&mut rng);
-			info!("Writing {} child keys", child_nodes.len());
+		child_nodes.shuffle(&mut rng);
+		info!("Writing {} child keys", child_nodes.len());
 
-			for (key, info) in child_nodes {
-				if let Some(original_v) = client
-					.child_storage(best_hash, &info.clone(), &key)
-					.expect("Checked above to exist")
-				{
-					let mut new_v = vec![0; original_v.0.len()];
-					loop {
-						rng.fill_bytes(&mut new_v[..]);
-						if check_new_value::<Block>(
-							db.clone(),
-							&trie,
-							&key.0,
-							&new_v,
-							self.state_version(),
-							state_col,
-							Some(&info),
-						) {
-							break
-						}
-					}
-
-					let (size, duration) = measure_write::<Block>(
+		for (key, info) in child_nodes {
+			if let Some(original_v) = client
+				.child_storage(best_hash, &info.clone(), &key)
+				.expect("Checked above to exist")
+			{
+				let mut new_v = vec![0; original_v.0.len()];
+				loop {
+					rng.fill_bytes(&mut new_v[..]);
+					if check_new_value::<Block>(
 						db.clone(),
 						&trie,
-						key.0,
-						new_v.to_vec(),
+						&key.0,
+						&new_v,
 						self.state_version(),
 						state_col,
 						Some(&info),
-					)?;
-					record.append(size, duration)?;
+					) {
+						break
+					}
 				}
+
+				let (size, duration) = measure_write::<Block>(
+					db.clone(),
+					&trie,
+					key.0,
+					new_v.to_vec(),
+					self.state_version(),
+					state_col,
+					Some(&info),
+				)?;
+				record.append(size, duration)?;
 			}
 		}
+		
 
 		Ok(record)
 	}
