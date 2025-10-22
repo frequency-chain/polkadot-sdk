@@ -39,7 +39,7 @@ impl StorageCmd {
 		let mut record = BenchRecord::default();
 		let best_hash = client.usage_info().chain.best_hash;
 
-		info!("Preparing keys from block {}", best_hash);
+		info!("Preparing keys from block - child only variant {}", best_hash);
 		// Load all keys and randomly shuffle them.
 		let mut keys: Vec<_> = client.storage_keys(best_hash, None, None)?.collect();
 		let (mut rng, _) = new_rng(None);

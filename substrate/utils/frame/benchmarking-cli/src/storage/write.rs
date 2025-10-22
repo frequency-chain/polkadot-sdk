@@ -59,7 +59,7 @@ impl StorageCmd {
 		let original_root = *header.state_root();
 		let trie = DbStateBuilder::<HashingFor<Block>>::new(storage.clone(), original_root).build();
 
-		info!("Preparing keys from block {}", best_hash);
+		info!("Preparing keys from block - child only variant {}", best_hash);
 		// Load all KV pairs and randomly shuffle them.
 		let mut kvs: Vec<_> = trie.pairs(Default::default())?.collect();
 		let (mut rng, _) = new_rng(None);
